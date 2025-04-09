@@ -1,0 +1,8 @@
+import joblib
+
+# Save the model
+joblib.dump(model, 'rf_model.pkl')
+
+# Save the list of features
+joblib.dump(X.columns.tolist(), 'model_features.pkl')
+
