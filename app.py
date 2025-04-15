@@ -1,73 +1,37 @@
-from flask import Flask, jsonify, request, send_file
-from flask_cors import CORS
-import joblib
-import pandas as pd
+from flask import Flask, request, send_file
 import csv
 import os
+from datetime import datetime
 
 app = Flask(__name__)
-CORS(app)
+FAULT_LOG_FILE = "fault_log.csv"
 
-# Load model and features
-model = joblib.load("rf_model.pkl")
-features = joblib.load("model_features.pkl")
-
-# Load simulated machine data stream
-machine_data_df = pd.read_csv("simulated_machine_stream.csv")
-current_index = 0
-
-@app.route("/")
-def home():
-    return "✅ Machine Monitoring API running."
-
-@app.route("/predict", methods=["POST"])
-def predict():
-    try:
-        data = request.get_json()
-        input_df = pd.DataFrame([data], columns=features)
-        prediction = model.predict(input_df)[0]
-        probability = model.predict_proba(input_df)[0].tolist()
-        return jsonify({
-            "prediction": int(prediction),
-            "probability": probability
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/live-data", methods=["GET"])
-def live_data():
-    global current_index
-    if current_index >= len(machine_data_df):
-        return jsonify({"done": True})
-    row = machine_data_df.iloc[current_index].to_dict()
-    current_index += 1
-    return jsonify(row)
-
-@app.route("/log-fault", methods=["POST"])
+@app.route('/log-fault', methods=['POST'])
 def log_fault():
-    fault_data = request.get_json()
+    # Get fault data from request
+    fault_data = request.json
 
-    if not fault_data:
-        return jsonify({"error": "No data received"}), 400
+    # Add current timestamp to the fault data
+    fault_data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Define the order of features to log
-    fieldnames = ["footfall", "tempMode", "AQ", "USS", "CS", "VOC", "RP", "IP", "Temperature"]
-    filename = "fault_log.csv"
+    # Write to CSV (appending new rows)
+    file_exists = os.path.exists(FAULT_LOG_FILE)
+    with open(FAULT_LOG_FILE, mode='a', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=list(fault_data.keys()))
+        
+        # Write header only if the file doesn't exist
+        if not file_exists:
+            writer.writeheader()
+        
+        writer.writerow(fault_data)
 
-    # Overwrite CSV with only the latest fault row
-    with open(filename, mode='w', newline='') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerow({key: fault_data[key] for key in fieldnames})
+    return {'message': 'Fault logged successfully'}, 200
 
-    return jsonify({"message": "Fault logged successfully"})
-
-@app.route("/download-faults", methods=["GET"])
+@app.route('/download-faults', methods=['GET'])
 def download_faults():
-    filename = "fault_log.csv"
-    if not os.path.exists(filename):
-        return jsonify({"error": "No faults logged yet."}), 404
-    return send_file(filename, mimetype="text/csv", as_attachment=True, download_name="fault_log.csv")
+    if not os.path.exists(FAULT_LOG_FILE):
+        return "No fault log found.", 404
+    return send_file(FAULT_LOG_FILE, as_attachment=True)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(debug=True)
